@@ -3,8 +3,6 @@ layout: post
 title: Lab 01
 ---
 
-> Update 2016-03-06: 讲义中提供的初始化中断控制器的代码里，`outb(IO_PIC1+1, 0x1)` 最好改成 `outb(IO_PIC1+1, 0x2)`，即设置 ICW4 的第 2 个位为 1，自动返回 EOI (End Of Interruption)；或者你可以了解如何手动返回 EOI。
-
 > 由于本网页是静态页面，很可能被浏览器缓存，请猛击 Ctrl-F5 强制刷新页面……
 
 ## 实验提交
@@ -446,6 +444,7 @@ outb(IO_PIC2, 0x68);             /* OCW3 */
 outb(IO_PIC2, 0x0a);             /* OCW3 */
 ```
 
+注意上述代码在设置ICW4时用的 `outb(IO_PIC1+1, 0x1);` 是设置为x86模式，所以你需要手动返回 EOI (End Of Interruption)，推荐改为 `outb(IO_PIC1+1, 0x2);` 这样就能自动返回 EOI 。
 上述代码头两行out指令将所有中断都屏蔽了，你可以直接在这里将`0xFF`修改成你需要的屏蔽模式（至少取消键盘和时钟中断的屏蔽），也可以在别的地方下面这样迭代地修改：
 
 ```c
