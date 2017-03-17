@@ -354,7 +354,53 @@ TSS 和代码段，数据段不同，是一个有特殊作用的段。
 为了让硬件在进行堆栈切换的时候可以找到新堆栈，内核需要将新堆栈的位置写入TSS的相应位置。
 TSS 中的其它内容主要在硬件上下文切换中使用, 在我们的实现中，主要通过软件实现上下文切换，因此 TSS 中的大部分内容都不会使用。
 我们需要用到的是其中的 SS0, ESP0 两个域，当用户程序通过中断陷入内核时，会通过硬件先切换到内核的堆栈，然后我们就可以在内核的堆栈中完成中断处理。
+每个TSS有它自己 8字节的任务段描述符（Task State Segment Descriptor ，简称TSSD）。这个描述符包括指向TSS起始地址的32位基地址域，20位界限域，界限域值不能小于十进制104（由TSS段的最小长度决定）。TSS描述符存放在GDT中，它是GDT中的一个表项。下面给出一份简单的taskstate结构供参考。
+```
+struct taskstate {                                                              
+    uint32_t ts_link;        // old ts selector
+    uintptr_t ts_esp0;        // stack pointers and segment selectors
+    uint16_t ts_ss0;        // after an increase in privilege level
+    uint16_t ts_padding1;
+    uintptr_t ts_esp1;
+    uint16_t ts_ss1;
+    uint16_t ts_padding2;
+    uintptr_t ts_esp2;
+    uint16_t ts_ss2;
+    uint16_t ts_padding3;
+    uintptr_t ts_cr3;        // page directory base
+    uintptr_t ts_eip;        // saved state from last task switch
+    uint32_t ts_eflags;
+    uint32_t ts_eax;        // more saved state (registers)
+    uint32_t ts_ecx;
+    uint32_t ts_edx;
+    uint32_t ts_ebx;
+    uintptr_t ts_esp;
+    uintptr_t ts_ebp;
+    uint32_t ts_esi;
+    uint32_t ts_edi;
+    uint16_t ts_es;            // even more saved state (segment selectors)
+    uint16_t ts_padding4;
+    uint16_t ts_cs;
+    uint16_t ts_padding5;
+    uint16_t ts_ss;
+    uint16_t ts_padding6;
+	uint16_t ts_ds;
+    uint16_t ts_padding7;
+    uint16_t ts_fs;
+    uint16_t ts_padding8;
+    uint16_t ts_gs;
+    uint16_t ts_padding9;
+    uint16_t ts_ldt;
+    uint16_t ts_padding10;
+    uint16_t ts_t;            // trap on task switch
+    uint16_t ts_iomb;        // i/o map base address
+};
+```
 TSS的结构可以在手册中找到，**你只需记住，TSS 里面存放着用户程序内核栈的信息**。
+在中断描述符表（IDT）中，除中断门、陷阱门和调用门外，还有一种“任务门”。任务门中包含有TSS段的选择符。当CPU因中断而穿过一个任务门时，就会将任务门中的段选择符自动装入TR寄存器，使TR指向新的TSS，并完成任务切换。CPU还可以通过JMP或CALL指令实现任务切换，当跳转或调用的目标段（代码段）实际上指向GDT表中的一个TSS描述符项时，就会引起一次任务切换。
+Intel的这种设计确实很周到，也为任务切换提供了一个非常简洁的机制。但是，由于i386的系统结构基本上是CISC的，通过JMP指令或CALL（或中断）完成任务的过程实际上是“复杂指令”的执行过程，其执行过程长达300多个CPU周期（一个POP指令占12个CPU周期），因此，**Linux内核并不完全使用i386CPU提供的任务切换机制。**
+由于i386CPU要求软件设置TR及TSS，Linux内核只不过“走过场”地设置TR及TSS，以满足CPU的要求。但是，内核并不使用任务门，也不使用JMP或CALL指令实施任务切换。内核只是在初始化阶段设置TR，使之指向一个TSS，从此以后再不改变TR的内容了。也就是说，每个CPU（如果有多个CPU）在初始化以后的全部运行过程中永远使用那个初始的TSS。同时，内核也不完全依靠TSS保存每个进程切换时的寄存器副本，而是将这些寄存器副本保存在各个进程自己的内核栈。
+这样以来，TSS中的绝大部分内容就失去了原来的意义。那么，当进行任务切换时，怎样自动更换堆栈？我们知道，新任务的内核栈指针（SS0和ESP0）应当取自当前任务的TSS，可是，Linux中并不是每个任务就有一个TSS，而是每个CPU只有一个TSS。Intel原来的意图是让TR的内容（即TSS）随着任务的切换而走马灯似地换，而在Linux内核中却成了只更换TSS中的SS0和ESP0，而不更换TSS本身，也就是根本不更换TR的内容。这是因为，改变TSS中SS0和ESP0所化的开销比通过装入TR以更换一个TSS要小得多。因此，在Linux内核中，TSS并不是属于某个进程的资源，而是全局性的公共资源。
 
 #### 地址信息
 
